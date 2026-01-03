@@ -51,6 +51,29 @@ class SNClient:
     def __init__(self):
         self._client = httpx.Client(timeout=60)
         self._access_token: Optional[str] = None
+        self._xsrf_token: Optional[str] = None
+
+    def _get_xsrf_token(self) -> str:
+        """Fetch XSRF token from the CSRF endpoint."""
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "Origin": "https://cloud.supernote.com",
+            "Referer": "https://cloud.supernote.com/",
+        }
+        response = self._client.get(f"{self.BASE_URL}{endpoints.csrf}", headers=headers)
+        xsrf_token = response.headers.get("X-Xsrf-Token")
+        if not xsrf_token:
+            raise ApiError("Failed to get XSRF token")
+        return xsrf_token
+
+    def _init_session(self) -> None:
+        """Initialize session by getting XSRF token."""
+        if self._xsrf_token:
+            return  # Already initialized
+
+        self._xsrf_token = self._get_xsrf_token()
 
     def _api_call(self, endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -66,9 +89,24 @@ class SNClient:
         Raises:
             requests.exceptions.RequestException: If the request fails
         """
+        # Ensure session is initialized (XSRF token + redisKey cookie)
+        self._init_session()
+
         headers = {
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
             "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+            "Origin": "https://cloud.supernote.com",
+            "Referer": "https://cloud.supernote.com/",
+            "X-XSRF-TOKEN": self._xsrf_token,
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+            "Sec-Ch-Ua": '"Not:A-Brand";v="24", "Chromium";v="134"',
+            "Sec-Ch-Ua-Mobile": "?0",
+            "Sec-Ch-Ua-Platform": '"Linux"',
+            "Dnt": "1",
         }
         if self._access_token:
             headers["x-access-token"] = self._access_token
@@ -119,10 +157,10 @@ class SNClient:
 
         pd = calc_sha256(calc_md5(password) + rc)
         payload = {
-            "countryCode": 1,
+            "countryCode": "1",
             "account": email,
             "password": pd,
-            "browser": "Chrome107",
+            "browser": "Chrome134",
             "equipment": "1",
             "loginMethod": "1",
             "timestamp": timestamp,

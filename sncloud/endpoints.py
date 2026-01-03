@@ -1,3 +1,5 @@
+csrf = "/csrf"
+token = "/user/query/token"
 code = "/official/user/query/random/code"
 login = "/official/user/account/login/new"
 ls = "/file/list/query"

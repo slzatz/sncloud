@@ -86,10 +86,13 @@ def cli():
 
 @cli.command()
 def login():
-    """Login to Supernote Cloud and save access token."""
+    """Login to Supernote Cloud and save access token.
+
+    Note: If you get a verification code error, use 'sncloud login-browser' instead.
+    """
     email = click.prompt("Email")
     password = click.prompt("Password", hide_input=True)
-    
+
     client = SNClient()
     try:
         token = client.login(email, password)
@@ -100,7 +103,88 @@ def login():
         click.echo("Login successful")
     except AuthenticationError as e:
         click.echo(f"Login failed: {str(e)}")
+        if "verification" in str(e).lower():
+            click.echo("\nTip: Use 'sncloud login-browser' to login via browser.")
         exit(1)
+
+
+@cli.command("login-browser")
+def login_browser():
+    """Login via browser (bypasses bot detection).
+
+    Use this if regular login fails with a verification code error.
+    Requires: pip install playwright && playwright install chromium
+    """
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        click.echo("Playwright not installed. Install with:")
+        click.echo("  pip install playwright && playwright install chromium")
+        exit(1)
+
+    email = click.prompt("Email")
+    password = click.prompt("Password", hide_input=True)
+
+    click.echo("Launching browser...")
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False)
+        context = browser.new_context()
+        page = context.new_page()
+
+        token = None
+
+        def handle_response(response):
+            nonlocal token
+            if 'login/new' in response.url and response.status == 200:
+                try:
+                    data = response.json()
+                    if data.get('success') and data.get('token'):
+                        token = data['token']
+                except:
+                    pass
+
+        page.on('response', handle_response)
+
+        click.echo("Loading login page...")
+        page.goto('https://cloud.supernote.com/')
+        page.wait_for_load_state('networkidle')
+
+        click.echo("Filling credentials...")
+        page.fill('input[type="text"], input[placeholder*="mail"], input[placeholder*="account"]', email)
+        page.fill('input[type="password"]', password)
+
+        # Check agreement checkbox if present
+        try:
+            checkbox = page.locator('input[type="checkbox"]').first
+            if checkbox.is_visible():
+                checkbox.check()
+        except:
+            pass
+
+        click.echo("Clicking login...")
+        page.click('button[type="submit"], button:has-text("Login"), button:has-text("Sign")')
+
+        page.wait_for_timeout(3000)
+
+        # Handle verification dialog if present
+        verification_input = page.locator('input[placeholder*="verification"], input[placeholder*="code"]')
+        if verification_input.is_visible():
+            click.echo("\nVerification required - check your email for the code.")
+            code = click.prompt("Enter verification code")
+            verification_input.fill(code)
+            page.click('button:has-text("Confirm")')
+            page.wait_for_timeout(5000)
+
+        browser.close()
+
+        if token:
+            config = {"access_token": token}
+            save_config(config)
+            click.echo("Login successful!")
+        else:
+            click.echo("Login failed. Please try again.")
+            exit(1)
 
 
 @cli.command()
